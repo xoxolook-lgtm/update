@@ -1,0 +1,8 @@
+{
+  "versionCode": 105,          // 必须比当前APP高
+  "versionName": "1.0.5",
+  "updateLog": "1. 修复崩溃问题\n2. 新增自动更新功能\n3. 优化UI",
+  "downloadUrl": "https://18506232305.gitee.io/app-update/app-release.apk",
+  "isForce": false,             // true=强制更新，false=可选
+  "apkSize": 52428800          // 包大小，单位byte（可选）
+}
