@@ -1,49 +1,64 @@
 import os
 import subprocess
 import sys
+import time
 
 def run_cmd(cmd):
-    print(f"执行: {cmd}")
+    print(f"\n▶ 执行: {cmd}")
     result = subprocess.run(cmd, shell=True)
     if result.returncode != 0:
-        print(f"命令执行失败: {cmd}")
-        sys.exit(1)
-    return result
+        print(f"\n❌ 命令失败: {cmd}")
+        return False
+    return True
 
 def main():
-    print("========================================")
-    print(" GitHub 自动推送工具（已适配你的仓库）")
-    print("========================================")
+    os.system("title 推送到 GitHub —— 不闪退版")
+    print("=" * 50)
+    print("      GitHub 自动推送工具（稳定不闪退）")
+    print("=" * 50)
+    time.sleep(0.5)
 
-    # ======================
-    # 已自动配置你的 GitHub
-    # ======================
+    # ====================
+    # 你的 GitHub 信息
+    # ====================
     remote_url = "https://github.com/xoxolook-lgtm/update.git"
     branch = "master"
 
-    # 切换到当前脚本目录
-    script_path = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_path)
+    try:
+        os.chdir(os.path.dirname(os.path.abspath(__file__)))
+    except:
+        pass
 
-    # 1. 设置远程仓库为 GitHub
-    print("\n==> 切换远程仓库到 GitHub...")
-    run_cmd(f'git remote set-url origin {remote_url}')
+    # 1. 切换远程到 GitHub
+    print("\n1/5 切换远程仓库到 GitHub...")
+    if not run_cmd(f'git remote set-url origin {remote_url}'):
+        input("\n出错！按回车退出")
+        return
 
-    # 2. 添加所有文件
-    print("\n==> 添加文件...")
+    # 2. 拉取最新（防止冲突）
+    print("\n2/5 同步远程最新代码...")
+    run_cmd(f'git pull origin {branch} --allow-unrelated-histories')
+
+    # 3. 添加文件
+    print("\n3/5 添加所有文件...")
     run_cmd("git add .")
 
-    # 3. 提交
-    print("\n==> 提交更新...")
-    run_cmd('git commit -m "自动更新"')
+    # 4. 提交
+    print("\n4/5 提交更新...")
+    run_cmd('git commit -m "update files"')
 
-    # 4. 推送到 GitHub
-    print("\n==> 推送到 GitHub...")
-    run_cmd(f"git push origin {branch}")
+    # 5. 推送
+    print("\n5/5 推送到 GitHub...")
+    if run_cmd(f"git push origin {branch}"):
+        print("\n✅ 推送成功！")
+        print("🌍 访问地址：")
+        print("https://xoxolook-lgtm.github.io/update/")
+    else:
+        print("\n❌ 推送失败！")
 
-    print("\n✅ 推送成功！已上传到 GitHub！")
-    print("访问你的 Pages 地址：")
-    print(f"https://xoxolook-lgtm.github.io/update/")
+    # 不闪退！
+    print("\n按回车键退出...")
+    input()
 
 if __name__ == "__main__":
     main()
