@@ -1,64 +1,59 @@
+# -*- coding: utf-8 -*-
 import os
 import subprocess
 import sys
-import time
 
-def run_cmd(cmd):
+def run(cmd):
     print(f"\n▶ 执行: {cmd}")
     result = subprocess.run(cmd, shell=True)
     if result.returncode != 0:
-        print(f"\n❌ 命令失败: {cmd}")
+        print(f"❌ 命令失败: {cmd}")
         return False
     return True
 
 def main():
-    os.system("title 推送到 GitHub —— 不闪退版")
     print("=" * 50)
-    print("      GitHub 自动推送工具（稳定不闪退）")
+    print("      GitHub 自动推送工具（SSH版）")
     print("=" * 50)
-    time.sleep(0.5)
 
-    # ====================
-    # 你的 GitHub 信息
-    # ====================
-    remote_url = "https://github.com/xoxolook-lgtm/update.git"
-    branch = "master"
+    # ===== 配置区 =====
+    REMOTE_URL = "git@github.com:xoxolook-lgtm/update.git"
+    BRANCH = "main"
+    # =================
 
-    try:
-        os.chdir(os.path.dirname(os.path.abspath(__file__)))
-    except:
-        pass
+    os.chdir(os.path.dirname(os.path.abspath(__file__)))
+    print(f"工作目录: {os.getcwd()}")
 
-    # 1. 切换远程到 GitHub
-    print("\n1/5 切换远程仓库到 GitHub...")
-    if not run_cmd(f'git remote set-url origin {remote_url}'):
-        input("\n出错！按回车退出")
-        return
+    # 1. 设置远程地址为 SSH
+    print("\n1/4 设置远程仓库地址...")
+    run(f"git remote set-url origin {REMOTE_URL}")
 
-    # 2. 拉取最新（防止冲突）
-    print("\n2/5 同步远程最新代码...")
-    run_cmd(f'git pull origin {branch} --allow-unrelated-histories')
+    # 2. 拉取远程 main 分支
+    print("\n2/4 拉取远程最新代码...")
+    run(f"git fetch origin {BRANCH}")
 
-    # 3. 添加文件
-    print("\n3/5 添加所有文件...")
-    run_cmd("git add .")
+    # 3. 添加所有文件（包括强制添加 update.json）
+    print("\n3/4 添加文件...")
+    run("git add -A")
+    run("git add -f update.json")   # 强制覆盖
 
-    # 4. 提交
-    print("\n4/5 提交更新...")
-    run_cmd('git commit -m "update files"')
-
-    # 5. 推送
-    print("\n5/5 推送到 GitHub...")
-    if run_cmd(f"git push origin {branch}"):
-        print("\n✅ 推送成功！")
-        print("🌍 访问地址：")
-        print("https://xoxolook-lgtm.github.io/update/")
+    # 4. 提交（如果有变更）
+    print("\n4/4 提交并推送...")
+    # 检查是否有变更
+    status = subprocess.run("git diff --cached --quiet", shell=True)
+    if status.returncode != 0:
+        run('git commit -m "auto update"')
+        run(f"git push origin {BRANCH}")
     else:
-        print("\n❌ 推送失败！")
+        # 可能还有未推送的提交
+        run(f"git push origin {BRANCH}")
 
-    # 不闪退！
-    print("\n按回车键退出...")
+    print("\n✅ 完成！按回车退出...")
     input()
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        print(f"异常: {e}")
+        input("按回车退出...")
