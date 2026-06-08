@@ -20,8 +20,8 @@ def main():
     print("\n【更新逻辑说明】")
     print("1. 设置远程仓库地址为 SSH 格式")
     print("2. 拉取远程 main 分支的最新代码（避免冲突）")
-    print("3. 添加所有变更文件：")
-    print("   - 执行 git add -A（添加所有修改和新增文件）")
+    print("3. 添加变更文件（忽略删除操作）：")
+    print("   - 执行 git add . （添加所有新增和修改的文件，不记录删除）")
     print("   - 执行 git add -f update.json（强制覆盖 update.json，即使被 .gitignore 忽略）")
     print("4. 检查暂存区是否有变更：")
     print("   - 如果有变更 → 提交（commit）并推送（push）到 GitHub")
@@ -44,8 +44,13 @@ def main():
     run(f"git fetch origin {BRANCH}")
 
     print("\n3/4 添加文件...")
-    run("git add -A")
-    run("git add -f update.json")   # 强制更新
+    # 使用 git add . 只添加新增和修改，忽略删除操作
+    run("git add .")
+    # 强制添加 update.json（如果文件存在）
+    if os.path.exists("update.json"):
+        run("git add -f update.json")
+    else:
+        print("   ⚠️ update.json 不存在，跳过强制添加")
 
     print("\n4/4 提交并推送...")
     # 检查是否有变更
