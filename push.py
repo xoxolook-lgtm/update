@@ -23,7 +23,7 @@ def main():
     print("   - git add --ignore-removal .")
     print("   - git add -f update.json（强制覆盖）")
     print("4. 提交变更（如果有）")
-    print("5. 强制推送到 GitHub（--force-with-lease）")
+    print("5. 强制推送到 GitHub（--force）")
     print("   ⚠️ 远程分支将被本地内容完全覆盖，远程独有的提交会丢失")
     print("   ✅ 本地删除的文件不会被推送删除（因为忽略删除操作）")
     print("-" * 50)
@@ -56,12 +56,12 @@ def main():
     if status.returncode != 0:
         print("\n4/4 提交并强制推送...")
         run('git commit -m "force update from local"')
-        # 使用 --force-with-lease 更安全（如果远程有未预期的更新会拒绝）
-        run(f"git push --force-with-lease origin {BRANCH}")
+        # 使用 --force 无条件覆盖远程
+        run(f"git push --force origin {BRANCH}")
     else:
         # 无本地变更，但可能本地有未推送的提交（例如之前遗留的）
         print("\n4/4 尝试强制推送已有提交...")
-        run(f"git push --force-with-lease origin {BRANCH}")
+        run(f"git push --force origin {BRANCH}")
 
     print("\n✅ 完成！按回车退出...")
     input()
