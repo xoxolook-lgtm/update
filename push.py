@@ -5,21 +5,12 @@ import sys
 import glob
 
 def run(cmd):
-    """执行 shell 命令，返回是否成功"""
+    """执行 shell 命令，返回是否成功；失败时打印错误并退出"""
     print(f"\n▶ 执行: {cmd}")
     result = subprocess.run(cmd, shell=True)
     if result.returncode != 0:
         print(f"❌ 命令失败: {cmd}")
-        return False
-    return True
-
-def run_list(cmd_args):
-    """执行列表形式的命令，打印并返回成功状态"""
-    print(f"\n▶ 执行: {' '.join(cmd_args)}")
-    result = subprocess.run(cmd_args)
-    if result.returncode != 0:
-        print(f"❌ 命令失败: {' '.join(cmd_args)}")
-        return False
+        sys.exit(1)
     return True
 
 def run_capture_list(cmd_args):
@@ -27,13 +18,28 @@ def run_capture_list(cmd_args):
     result = subprocess.run(cmd_args, capture_output=True, text=True)
     return result.returncode, result.stdout, result.stderr
 
-def delete_apk_from_repo_only():
-    """
-    仅从 Git 仓库中删除所有 .apk 文件（保留本地文件），并将 .apk 加入 .gitignore
-    """
-    print("\n🗑️  正在从 Git 仓库中移除所有 .apk 文件（本地文件保留）...")
+def check_clean_state():
+    """检查 Git 仓库是否处于干净状态（无冲突、无未完成操作）"""
+    # 检查是否在 rebase 中
+    git_dir = subprocess.run(["git", "rev-parse", "--git-dir"], capture_output=True, text=True).stdout.strip()
+    if not git_dir:
+        print("❌ 当前目录不是 Git 仓库")
+        return False
+    if os.path.exists(os.path.join(git_dir, "rebase-merge")) or os.path.exists(os.path.join(git_dir, "rebase-apply")):
+        print("❌ 检测到未完成的 git rebase，请先执行 'git rebase --abort' 或手动解决。")
+        return False
+    # 检查冲突
+    status = subprocess.run("git status --porcelain", shell=True, capture_output=True, text=True).stdout
+    for line in status.splitlines():
+        if line.startswith("UU ") or "needs merge" in line:
+            print(f"❌ 检测到未解决的冲突: {line}")
+            print("请手动解决冲突，或执行 'git merge --abort' / 'git rebase --abort' 后再运行本脚本。")
+            return False
+    return True
 
-    # 获取所有被 Git 跟踪的 .apk 文件
+def delete_apk_from_repo_only():
+    """仅从 Git 仓库中删除所有 .apk 文件（保留本地文件），并将 .apk 加入 .gitignore"""
+    print("\n🗑️  正在从 Git 仓库中移除所有 .apk 文件（本地文件保留）...")
     returncode, stdout, stderr = run_capture_list(["git", "ls-files", "--", "*.apk"])
     if returncode != 0:
         print("   ⚠️ 无法获取 Git 跟踪的文件列表")
@@ -45,7 +51,6 @@ def delete_apk_from_repo_only():
 
     deleted_count = 0
     for file_path in apk_files:
-        # 使用 git rm --cached 仅删除索引中的记录，保留工作区文件
         returncode, _, stderr = run_capture_list(["git", "rm", "--cached", "--ignore-unmatch", file_path])
         if returncode == 0:
             print(f"   ✓ 已从仓库中移除（本地保留）: {file_path}")
@@ -56,7 +61,6 @@ def delete_apk_from_repo_only():
     if deleted_count == 0:
         return
 
-    # 确保 .gitignore 中包含 *.apk 忽略规则
     gitignore_path = ".gitignore"
     apk_ignore_line = "*.apk"
     need_add_gitignore = False
@@ -77,7 +81,6 @@ def delete_apk_from_repo_only():
         print(f"   ✓ 已创建 .gitignore 并添加 '{apk_ignore_line}'")
 
     if need_add_gitignore:
-        # 暂存 .gitignore 的修改
         subprocess.run(["git", "add", gitignore_path], check=False)
         print(f"   ✓ 已暂存 .gitignore 的变更")
 
@@ -87,6 +90,11 @@ def main():
     print("=" * 50)
     print("   GitHub 推送工具（合并远程变更，不强制覆盖）")
     print("=" * 50)
+
+    # 先检查仓库状态
+    if not check_clean_state():
+        input("按回车退出...")
+        return
 
     print("\n【更新逻辑说明】")
     print("1. 设置远程仓库地址为 SSH 格式")
@@ -99,7 +107,6 @@ def main():
     print("6. 推送变更到 GitHub（非强制，若远程有冲突会停止）")
     print("-" * 50)
 
-    # ===== 询问是否从仓库中删除所有 .apk 文件 =====
     while True:
         choice = input("\n🔧 是否从 Git 仓库中删除所有 .apk 文件（本地文件保留）？\n   1 - 仅删除仓库中的 .apk\n   2 - 跳过\n请选择 (1/2): ").strip()
         if choice in ('1', '2'):
@@ -107,22 +114,18 @@ def main():
         print("❌ 输入无效，请重新输入 1 或 2")
     delete_apk = (choice == '1')
 
-    # ===== 配置区 =====
     REMOTE_URL = "git@github.com:xoxolook-lgtm/update.git"
     BRANCH = "main"
-    # =================
 
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     print(f"\n工作目录: {os.getcwd()}")
 
-    # 如果需要删除仓库中的 .apk，在 git 操作前执行
     if delete_apk:
         delete_apk_from_repo_only()
 
     print("\n1/6 设置远程仓库地址...")
     run(f"git remote set-url origin {REMOTE_URL}")
 
-    # 确保在正确的分支
     print("\n2/6 切换到 main 分支...")
     run(f"git checkout {BRANCH}")
 
@@ -133,26 +136,17 @@ def main():
     else:
         print("   ⚠️ update.json 不存在，跳过强制添加")
 
-    # 检查是否有变更需要提交
     status = subprocess.run("git diff --cached --quiet", shell=True)
     if status.returncode != 0:
         print("\n4/6 提交本地变更...")
-        if not run('git commit -m "update from local"'):
-            print("❌ 提交失败，退出")
-            input("按回车退出...")
-            return
+        run('git commit -m "update from local"')
     else:
         print("\n4/6 没有需要提交的本地变更，跳过提交。")
 
-    # 拉取远程更新并合并（使用 rebase 保持历史线性）
     print("\n5/6 拉取远程更新并合并（避免覆盖远程文件）...")
-    # 先 fetch
-    if not run(f"git fetch origin {BRANCH}"):
-        print("❌ 获取远程更新失败")
-        input("按回车退出...")
-        return
+    run(f"git fetch origin {BRANCH}")
 
-    # 检查工作区是否有未暂存的更改（例如被忽略的删除状态）
+    # 暂存未暂存更改（保留已暂存内容）
     status_output = subprocess.run("git status --porcelain", shell=True, capture_output=True, text=True).stdout.strip()
     stashed = False
     if status_output:
@@ -169,15 +163,13 @@ def main():
         stashed = True
         print("   ✓ 未暂存更改已临时保存")
 
-    # 尝试 rebase
     print("正在将本地提交变基到远程分支...")
     result = subprocess.run(["git", "rebase", f"origin/{BRANCH}"], capture_output=True, text=True)
     if result.returncode != 0:
         print("❌ 变基时发生冲突！")
         if stashed:
-            # 变基失败，丢弃 stash，避免冲突干扰手动解决
             subprocess.run(["git", "stash", "drop"], capture_output=True, text=True)
-            print("   已丢弃临时存储，请手动解决冲突后运行 'git rebase --continue'")
+            print("   已丢弃临时存储")
         print("请手动解决冲突后运行 'git rebase --continue' 再重新运行本脚本。")
         print("或运行 'git rebase --abort' 放弃本次操作。")
         print(f"错误信息：{result.stderr}")
@@ -186,18 +178,13 @@ def main():
     else:
         print("✅ 变基成功，本地历史已更新。")
 
-    # 如果之前暂存了，直接丢弃 stash（不恢复未暂存的删除状态，因为这些删除不会影响推送）
     if stashed:
         print("丢弃之前暂存的更改（本地未暂存的删除不会影响本次推送）...")
         subprocess.run(["git", "stash", "drop"], capture_output=True, text=True)
         print("   ✓ 已丢弃临时存储")
 
-    # 推送（不带 --force）
     print("\n6/6 正在推送至远程仓库...")
-    if not run(f"git push origin {BRANCH}"):
-        print("❌ 推送失败，可能是远程有新的更新或网络问题。")
-        input("按回车退出...")
-        return
+    run(f"git push origin {BRANCH}")
 
     print("\n✅ 完成！按回车退出...")
     input()
