@@ -110,14 +110,14 @@ def main():
     if delete_apk:
         delete_apk_from_repo_only()
 
-    print("\n1/5 设置远程仓库地址...")
+    print("\n1/6 设置远程仓库地址...")
     run(f"git remote set-url origin {REMOTE_URL}")
 
     # 确保在正确的分支
-    print("\n2/5 切换到 main 分支...")
+    print("\n2/6 切换到 main 分支...")
     run(f"git checkout {BRANCH}")
 
-    print("\n3/5 添加文件（忽略普通删除）...")
+    print("\n3/6 添加文件（忽略普通删除）...")
     run("git add --ignore-removal .")
     if os.path.exists("update.json"):
         run("git add -f update.json")
@@ -127,27 +127,48 @@ def main():
     # 检查是否有变更需要提交
     status = subprocess.run("git diff --cached --quiet", shell=True)
     if status.returncode != 0:
-        print("\n4/5 提交本地变更...")
+        print("\n4/6 提交本地变更...")
         if not run('git commit -m "update from local"'):
             print("❌ 提交失败，退出")
             input("按回车退出...")
             return
     else:
-        print("\n4/5 没有需要提交的本地变更，跳过提交。")
+        print("\n4/6 没有需要提交的本地变更，跳过提交。")
 
     # 拉取远程更新并合并（使用 rebase 保持历史线性）
-    print("\n5/5 拉取远程更新并合并（避免覆盖远程文件）...")
+    print("\n5/6 拉取远程更新并合并（避免覆盖远程文件）...")
     # 先 fetch
     if not run(f"git fetch origin {BRANCH}"):
         print("❌ 获取远程更新失败")
         input("按回车退出...")
         return
 
-    # 尝试 rebase，如果有冲突则停止
+    # 检查工作区是否有未暂存的更改（例如被忽略的删除状态）
+    status_output = subprocess.run("git status --porcelain", shell=True, capture_output=True, text=True).stdout.strip()
+    stashed = False
+    if status_output:
+        print("⚠️ 发现未暂存的更改，正在自动暂存（不影响已暂存的内容）...")
+        # --keep-index 只暂存未暂存的更改，保留已暂存（staged）的更改
+        stash_result = subprocess.run(
+            "git stash push --keep-index -m 'auto stash before rebase'",
+            shell=True, capture_output=True, text=True
+        )
+        if stash_result.returncode != 0:
+            print("❌ 暂存失败，请手动处理。")
+            print(stash_result.stderr)
+            input("按回车退出...")
+            return
+        stashed = True
+        print("   ✓ 未暂存更改已临时保存")
+
+    # 尝试 rebase
     print("正在将本地提交变基到远程分支...")
     result = subprocess.run(f"git rebase origin/{BRANCH}", shell=True, capture_output=True, text=True)
     if result.returncode != 0:
         print("❌ 变基时发生冲突！")
+        if stashed:
+            print("正在恢复之前暂存的更改...")
+            subprocess.run("git stash pop", shell=True)
         print("请手动解决冲突后运行 'git rebase --continue' 再重新运行本脚本。")
         print("或运行 'git rebase --abort' 放弃本次操作。")
         print(f"错误信息：{result.stderr}")
@@ -156,8 +177,20 @@ def main():
     else:
         print("✅ 变基成功，本地历史已更新。")
 
+    # 如果之前暂存了，恢复暂存内容
+    if stashed:
+        print("恢复之前暂存的更改...")
+        pop_result = subprocess.run("git stash pop", shell=True, capture_output=True, text=True)
+        if pop_result.returncode != 0:
+            print("⚠️ 恢复暂存内容时出现冲突，请手动处理。")
+            print(pop_result.stderr)
+            input("按回车退出...")
+            return
+        else:
+            print("   ✓ 已恢复未暂存的更改")
+
     # 推送（不带 --force）
-    print("正在推送至远程仓库...")
+    print("\n6/6 正在推送至远程仓库...")
     if not run(f"git push origin {BRANCH}"):
         print("❌ 推送失败，可能是远程有新的更新或网络问题。")
         input("按回车退出...")
