@@ -13,6 +13,11 @@ def run(cmd):
         return False
     return True
 
+def run_capture(cmd_args):
+    """执行命令（列表形式），返回 (returncode, stdout, stderr)"""
+    result = subprocess.run(cmd_args, capture_output=True, text=True)
+    return result.returncode, result.stdout, result.stderr
+
 def delete_apk_from_repo_only():
     """
     仅从 Git 仓库中删除所有 .apk 文件（保留本地文件），并将 .apk 加入 .gitignore
@@ -20,15 +25,11 @@ def delete_apk_from_repo_only():
     print("\n🗑️  正在从 Git 仓库中移除所有 .apk 文件（本地文件保留）...")
 
     # 获取所有被 Git 跟踪的 .apk 文件
-    result = subprocess.run(
-        ["git", "ls-files", "--", "*.apk"],
-        capture_output=True,
-        text=True
-    )
-    if result.returncode != 0:
+    returncode, stdout, stderr = run_capture(["git", "ls-files", "--", "*.apk"])
+    if returncode != 0:
         print("   ⚠️ 无法获取 Git 跟踪的文件列表")
         return
-    apk_files = [f.strip() for f in result.stdout.splitlines() if f.strip()]
+    apk_files = [f.strip() for f in stdout.splitlines() if f.strip()]
     if not apk_files:
         print("   ⚠️ 未找到任何被 Git 跟踪的 .apk 文件，无需删除")
         return
@@ -36,16 +37,12 @@ def delete_apk_from_repo_only():
     deleted_count = 0
     for file_path in apk_files:
         # 使用 git rm --cached 仅删除索引中的记录，保留工作区文件
-        result = subprocess.run(
-            ["git", "rm", "--cached", "--ignore-unmatch", file_path],
-            capture_output=True,
-            text=True
-        )
-        if result.returncode == 0:
+        returncode, _, stderr = run_capture(["git", "rm", "--cached", "--ignore-unmatch", file_path])
+        if returncode == 0:
             print(f"   ✓ 已从仓库中移除（本地保留）: {file_path}")
             deleted_count += 1
         else:
-            print(f"   ✗ 移除失败 {file_path}: {result.stderr.strip()}")
+            print(f"   ✗ 移除失败 {file_path}: {stderr.strip()}")
 
     if deleted_count == 0:
         return
@@ -79,20 +76,18 @@ def delete_apk_from_repo_only():
 
 def main():
     print("=" * 50)
-    print("   GitHub 强制推送工具（以本地为准）")
+    print("   GitHub 推送工具（合并远程变更，不强制覆盖）")
     print("=" * 50)
 
     print("\n【更新逻辑说明】")
     print("1. 设置远程仓库地址为 SSH 格式")
-    print("2. 不拉取远程代码（忽略远程领先情况）")
+    print("2. 拉取远程最新代码并与本地合并（避免覆盖远程独有文件）")
     print("3. 可选：仅从仓库中删除所有 .apk 文件（本地保留），并自动加入 .gitignore")
     print("4. 添加变更文件（仅新增和修改，忽略普通删除）：")
     print("   - git add --ignore-removal .")
     print("   - git add -f update.json（强制覆盖）")
     print("5. 提交变更（如果有）")
-    print("6. 强制推送到 GitHub（--force）")
-    print("   ⚠️ 远程分支将被本地内容完全覆盖，远程独有的提交会丢失")
-    print("   ✅ 普通删除的文件不会被推送删除（因为忽略删除操作）")
+    print("6. 推送变更到 GitHub（非强制，若远程有冲突会停止）")
     print("-" * 50)
 
     # ===== 询问是否从仓库中删除所有 .apk 文件 =====
@@ -115,15 +110,14 @@ def main():
     if delete_apk:
         delete_apk_from_repo_only()
 
-    print("\n1/4 设置远程仓库地址...")
+    print("\n1/5 设置远程仓库地址...")
     run(f"git remote set-url origin {REMOTE_URL}")
 
     # 确保在正确的分支
-    print("\n2/4 切换到 main 分支...")
+    print("\n2/5 切换到 main 分支...")
     run(f"git checkout {BRANCH}")
 
-    print("\n3/4 添加文件（忽略普通删除）...")
-    # 只添加新增和修改，忽略删除（.apk 的删除已通过 git rm --cached 暂存）
+    print("\n3/5 添加文件（忽略普通删除）...")
     run("git add --ignore-removal .")
     if os.path.exists("update.json"):
         run("git add -f update.json")
@@ -133,13 +127,41 @@ def main():
     # 检查是否有变更需要提交
     status = subprocess.run("git diff --cached --quiet", shell=True)
     if status.returncode != 0:
-        print("\n4/4 提交并强制推送...")
-        run('git commit -m "force update from local"')
-        run(f"git push --force origin {BRANCH}")
+        print("\n4/5 提交本地变更...")
+        if not run('git commit -m "update from local"'):
+            print("❌ 提交失败，退出")
+            input("按回车退出...")
+            return
     else:
-        # 无本地变更，但可能本地有未推送的提交（例如之前遗留的）
-        print("\n4/4 尝试强制推送已有提交...")
-        run(f"git push --force origin {BRANCH}")
+        print("\n4/5 没有需要提交的本地变更，跳过提交。")
+
+    # 拉取远程更新并合并（使用 rebase 保持历史线性）
+    print("\n5/5 拉取远程更新并合并（避免覆盖远程文件）...")
+    # 先 fetch
+    if not run(f"git fetch origin {BRANCH}"):
+        print("❌ 获取远程更新失败")
+        input("按回车退出...")
+        return
+
+    # 尝试 rebase，如果有冲突则停止
+    print("正在将本地提交变基到远程分支...")
+    result = subprocess.run(f"git rebase origin/{BRANCH}", shell=True, capture_output=True, text=True)
+    if result.returncode != 0:
+        print("❌ 变基时发生冲突！")
+        print("请手动解决冲突后运行 'git rebase --continue' 再重新运行本脚本。")
+        print("或运行 'git rebase --abort' 放弃本次操作。")
+        print(f"错误信息：{result.stderr}")
+        input("按回车退出...")
+        return
+    else:
+        print("✅ 变基成功，本地历史已更新。")
+
+    # 推送（不带 --force）
+    print("正在推送至远程仓库...")
+    if not run(f"git push origin {BRANCH}"):
+        print("❌ 推送失败，可能是远程有新的更新或网络问题。")
+        input("按回车退出...")
+        return
 
     print("\n✅ 完成！按回车退出...")
     input()
