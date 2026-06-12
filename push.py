@@ -5,7 +5,7 @@ import sys
 import glob
 
 def run(cmd):
-    """执行 shell 命令，返回是否成功；失败时打印错误并退出"""
+    """执行 shell 命令，返回是否成功；失败时退出"""
     print(f"\n▶ 执行: {cmd}")
     result = subprocess.run(cmd, shell=True)
     if result.returncode != 0:
@@ -14,13 +14,12 @@ def run(cmd):
     return True
 
 def run_capture_list(cmd_args):
-    """执行列表形式的命令，捕获输出，返回 (returncode, stdout, stderr)"""
+    """执行列表命令，捕获输出"""
     result = subprocess.run(cmd_args, capture_output=True, text=True)
     return result.returncode, result.stdout, result.stderr
 
 def check_clean_state():
-    """检查 Git 仓库是否处于干净状态（无冲突、无未完成操作）"""
-    # 检查是否在 rebase 中
+    """检查 Git 仓库是否干净（无冲突、无未完成操作）"""
     git_dir = subprocess.run(["git", "rev-parse", "--git-dir"], capture_output=True, text=True).stdout.strip()
     if not git_dir:
         print("❌ 当前目录不是 Git 仓库")
@@ -28,7 +27,6 @@ def check_clean_state():
     if os.path.exists(os.path.join(git_dir, "rebase-merge")) or os.path.exists(os.path.join(git_dir, "rebase-apply")):
         print("❌ 检测到未完成的 git rebase，请先执行 'git rebase --abort' 或手动解决。")
         return False
-    # 检查冲突
     status = subprocess.run("git status --porcelain", shell=True, capture_output=True, text=True).stdout
     for line in status.splitlines():
         if line.startswith("UU ") or "needs merge" in line:
@@ -86,33 +84,58 @@ def delete_apk_from_repo_only():
 
     print(f"✅ 共从仓库中移除了 {deleted_count} 个 .apk 文件（本地文件已保留）")
 
+def add_all_apk_files():
+    """强制添加当前目录下所有 .apk 文件到 Git 索引（忽略 .gitignore）"""
+    print("\n📦 正在查找本地所有 .apk 文件...")
+    apk_files = glob.glob("**/*.apk", recursive=True)
+    if not apk_files:
+        print("   ⚠️ 未找到任何 .apk 文件，无需添加")
+        return
+
+    added_count = 0
+    for file_path in apk_files:
+        # 使用 git add -f 强制添加
+        result = subprocess.run(["git", "add", "-f", file_path], capture_output=True, text=True)
+        if result.returncode == 0:
+            print(f"   ✓ 已添加到暂存区: {file_path}")
+            added_count += 1
+        else:
+            print(f"   ✗ 添加失败 {file_path}: {result.stderr.strip()}")
+    print(f"✅ 共添加了 {added_count} 个 .apk 文件到暂存区")
+
 def main():
     print("=" * 50)
     print("   GitHub 推送工具（合并远程变更，不强制覆盖）")
     print("=" * 50)
 
-    # 先检查仓库状态
     if not check_clean_state():
         input("按回车退出...")
         return
 
     print("\n【更新逻辑说明】")
     print("1. 设置远程仓库地址为 SSH 格式")
-    print("2. 拉取远程最新代码并与本地合并（避免覆盖远程独有文件）")
-    print("3. 可选：仅从仓库中删除所有 .apk 文件（本地保留），并自动加入 .gitignore")
-    print("4. 添加变更文件（仅新增和修改，忽略普通删除）：")
-    print("   - git add --ignore-removal .")
-    print("   - git add -f update.json（强制覆盖）")
-    print("5. 提交变更（如果有）")
-    print("6. 推送变更到 GitHub（非强制，若远程有冲突会停止）")
+    print("2. 可选：从仓库中删除所有 .apk 文件（本地保留）")
+    print("3. 可选：强制添加本地所有 .apk 文件（上传到服务器）")
+    print("4. 添加其他变更文件（仅新增和修改，忽略普通删除）")
+    print("5. 提交变更")
+    print("6. 拉取远程并合并（rebase），然后推送（非强制）")
     print("-" * 50)
 
+    # 询问删除 APK
     while True:
-        choice = input("\n🔧 是否从 Git 仓库中删除所有 .apk 文件（本地文件保留）？\n   1 - 仅删除仓库中的 .apk\n   2 - 跳过\n请选择 (1/2): ").strip()
-        if choice in ('1', '2'):
+        choice_del = input("\n🔧 是否从 Git 仓库中删除所有 .apk 文件（本地文件保留）？\n   1 - 删除仓库中的 .apk\n   2 - 跳过\n请选择 (1/2): ").strip()
+        if choice_del in ('1', '2'):
             break
         print("❌ 输入无效，请重新输入 1 或 2")
-    delete_apk = (choice == '1')
+    delete_apk = (choice_del == '1')
+
+    # 询问上传 APK
+    while True:
+        choice_add = input("\n📤 是否强制添加本地所有 .apk 文件（上传到服务器）？\n   1 - 添加所有 .apk 并上传\n   2 - 跳过\n请选择 (1/2): ").strip()
+        if choice_add in ('1', '2'):
+            break
+        print("❌ 输入无效，请重新输入 1 或 2")
+    upload_apk = (choice_add == '1')
 
     REMOTE_URL = "git@github.com:xoxolook-lgtm/update.git"
     BRANCH = "main"
@@ -123,27 +146,31 @@ def main():
     if delete_apk:
         delete_apk_from_repo_only()
 
-    print("\n1/6 设置远程仓库地址...")
+    print("\n1/7 设置远程仓库地址...")
     run(f"git remote set-url origin {REMOTE_URL}")
 
-    print("\n2/6 切换到 main 分支...")
+    print("\n2/7 切换到 main 分支...")
     run(f"git checkout {BRANCH}")
 
-    print("\n3/6 添加文件（忽略普通删除）...")
+    print("\n3/7 添加文件（忽略普通删除）...")
     run("git add --ignore-removal .")
     if os.path.exists("update.json"):
         run("git add -f update.json")
     else:
         print("   ⚠️ update.json 不存在，跳过强制添加")
 
+    if upload_apk:
+        add_all_apk_files()
+
+    # 检查是否有变更需要提交
     status = subprocess.run("git diff --cached --quiet", shell=True)
     if status.returncode != 0:
-        print("\n4/6 提交本地变更...")
+        print("\n4/7 提交本地变更...")
         run('git commit -m "update from local"')
     else:
-        print("\n4/6 没有需要提交的本地变更，跳过提交。")
+        print("\n4/7 没有需要提交的本地变更，跳过提交。")
 
-    print("\n5/6 拉取远程更新并合并（避免覆盖远程文件）...")
+    print("\n5/7 拉取远程更新并合并（避免覆盖远程文件）...")
     run(f"git fetch origin {BRANCH}")
 
     # 暂存未暂存更改（保留已暂存内容）
@@ -183,10 +210,11 @@ def main():
         subprocess.run(["git", "stash", "drop"], capture_output=True, text=True)
         print("   ✓ 已丢弃临时存储")
 
-    print("\n6/6 正在推送至远程仓库...")
+    print("\n6/7 正在推送至远程仓库...")
     run(f"git push origin {BRANCH}")
 
-    print("\n✅ 完成！按回车退出...")
+    print("\n7/7 完成！")
+    print("\n✅ 按回车退出...")
     input()
 
 if __name__ == "__main__":
