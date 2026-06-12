@@ -13,38 +13,69 @@ def run(cmd):
         return False
     return True
 
-def delete_all_apk_and_stage_removal():
+def delete_apk_from_repo_only():
     """
-    递归删除当前目录下所有 .apk 文件，并使用 git rm 记录删除（如果文件被跟踪）
+    仅从 Git 仓库中删除所有 .apk 文件（保留本地文件），并将 .apk 加入 .gitignore
     """
-    print("\n🗑️  正在删除所有 .apk 文件...")
-    apk_files = glob.glob("**/*.apk", recursive=True)
+    print("\n🗑️  正在从 Git 仓库中移除所有 .apk 文件（本地文件保留）...")
+
+    # 获取所有被 Git 跟踪的 .apk 文件
+    result = subprocess.run(
+        ["git", "ls-files", "--", "*.apk"],
+        capture_output=True,
+        text=True
+    )
+    if result.returncode != 0:
+        print("   ⚠️ 无法获取 Git 跟踪的文件列表")
+        return
+    apk_files = [f.strip() for f in result.stdout.splitlines() if f.strip()]
     if not apk_files:
-        print("   ⚠️ 未找到任何 .apk 文件，无需删除")
+        print("   ⚠️ 未找到任何被 Git 跟踪的 .apk 文件，无需删除")
         return
 
     deleted_count = 0
     for file_path in apk_files:
-        # 尝试用 git rm 删除（同时删除工作区和暂存区记录）
-        # 如果文件未被跟踪，git rm 会失败，此时只物理删除文件
+        # 使用 git rm --cached 仅删除索引中的记录，保留工作区文件
         result = subprocess.run(
-            ["git", "rm", "--ignore-unmatch", "-f", file_path],
+            ["git", "rm", "--cached", "--ignore-unmatch", file_path],
             capture_output=True,
             text=True
         )
         if result.returncode == 0:
-            print(f"   ✓ 已从 Git 删除并移除文件: {file_path}")
+            print(f"   ✓ 已从仓库中移除（本地保留）: {file_path}")
             deleted_count += 1
         else:
-            # 文件可能未被跟踪，直接物理删除
-            try:
-                os.remove(file_path)
-                print(f"   ✓ 已删除未跟踪的文件: {file_path}")
-                deleted_count += 1
-            except Exception as e:
-                print(f"   ✗ 删除失败 {file_path}: {e}")
+            print(f"   ✗ 移除失败 {file_path}: {result.stderr.strip()}")
 
-    print(f"✅ 共删除了 {deleted_count} 个 .apk 文件（Git 删除记录已暂存）")
+    if deleted_count == 0:
+        return
+
+    # 确保 .gitignore 中包含 *.apk 忽略规则
+    gitignore_path = ".gitignore"
+    apk_ignore_line = "*.apk"
+    need_add_gitignore = False
+    if os.path.exists(gitignore_path):
+        with open(gitignore_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        if apk_ignore_line not in content:
+            with open(gitignore_path, "a", encoding="utf-8") as f:
+                f.write(f"\n{apk_ignore_line}\n")
+            need_add_gitignore = True
+            print(f"   ✓ 已将 '{apk_ignore_line}' 添加到 .gitignore")
+        else:
+            print(f"   ✓ .gitignore 已包含 '{apk_ignore_line}'，无需重复添加")
+    else:
+        with open(gitignore_path, "w", encoding="utf-8") as f:
+            f.write(f"{apk_ignore_line}\n")
+        need_add_gitignore = True
+        print(f"   ✓ 已创建 .gitignore 并添加 '{apk_ignore_line}'")
+
+    if need_add_gitignore:
+        # 暂存 .gitignore 的修改
+        subprocess.run(["git", "add", gitignore_path], check=False)
+        print(f"   ✓ 已暂存 .gitignore 的变更")
+
+    print(f"✅ 共从仓库中移除了 {deleted_count} 个 .apk 文件（本地文件已保留）")
 
 def main():
     print("=" * 50)
@@ -54,19 +85,19 @@ def main():
     print("\n【更新逻辑说明】")
     print("1. 设置远程仓库地址为 SSH 格式")
     print("2. 不拉取远程代码（忽略远程领先情况）")
-    print("3. 可选：删除所有 .apk 文件后再上传（远程也将被删除）")
-    print("4. 添加变更文件（仅新增和修改，忽略删除，但 .apk 删除特殊处理）：")
+    print("3. 可选：仅从仓库中删除所有 .apk 文件（本地保留），并自动加入 .gitignore")
+    print("4. 添加变更文件（仅新增和修改，忽略普通删除）：")
     print("   - git add --ignore-removal .")
     print("   - git add -f update.json（强制覆盖）")
     print("5. 提交变更（如果有）")
     print("6. 强制推送到 GitHub（--force）")
     print("   ⚠️ 远程分支将被本地内容完全覆盖，远程独有的提交会丢失")
-    print("   ✅ 除 .apk 外，本地删除的其他文件不会被推送删除（因为忽略删除操作）")
+    print("   ✅ 普通删除的文件不会被推送删除（因为忽略删除操作）")
     print("-" * 50)
 
-    # ===== 新增：询问是否删除所有 .apk 文件 =====
+    # ===== 询问是否从仓库中删除所有 .apk 文件 =====
     while True:
-        choice = input("\n🔧 是否删除所有 .apk 文件后再上传更新？\n   1 - 删除所有 .apk\n   2 - 跳过\n请选择 (1/2): ").strip()
+        choice = input("\n🔧 是否从 Git 仓库中删除所有 .apk 文件（本地文件保留）？\n   1 - 仅删除仓库中的 .apk\n   2 - 跳过\n请选择 (1/2): ").strip()
         if choice in ('1', '2'):
             break
         print("❌ 输入无效，请重新输入 1 或 2")
@@ -80,9 +111,9 @@ def main():
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     print(f"\n工作目录: {os.getcwd()}")
 
-    # 如果需要删除 apk，在 git 操作前执行
+    # 如果需要删除仓库中的 .apk，在 git 操作前执行
     if delete_apk:
-        delete_all_apk_and_stage_removal()
+        delete_apk_from_repo_only()
 
     print("\n1/4 设置远程仓库地址...")
     run(f"git remote set-url origin {REMOTE_URL}")
@@ -91,8 +122,8 @@ def main():
     print("\n2/4 切换到 main 分支...")
     run(f"git checkout {BRANCH}")
 
-    print("\n3/4 添加文件（忽略除 .apk 以外的删除）...")
-    # 只添加新增和修改，忽略删除（但 .apk 的删除已在之前通过 git rm 暂存）
+    print("\n3/4 添加文件（忽略普通删除）...")
+    # 只添加新增和修改，忽略删除（.apk 的删除已通过 git rm --cached 暂存）
     run("git add --ignore-removal .")
     if os.path.exists("update.json"):
         run("git add -f update.json")
