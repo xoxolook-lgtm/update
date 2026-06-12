@@ -13,8 +13,17 @@ def run(cmd):
         return False
     return True
 
-def run_capture(cmd_args):
-    """执行命令（列表形式），返回 (returncode, stdout, stderr)"""
+def run_list(cmd_args):
+    """执行列表形式的命令，打印并返回成功状态"""
+    print(f"\n▶ 执行: {' '.join(cmd_args)}")
+    result = subprocess.run(cmd_args)
+    if result.returncode != 0:
+        print(f"❌ 命令失败: {' '.join(cmd_args)}")
+        return False
+    return True
+
+def run_capture_list(cmd_args):
+    """执行列表形式的命令，捕获输出，返回 (returncode, stdout, stderr)"""
     result = subprocess.run(cmd_args, capture_output=True, text=True)
     return result.returncode, result.stdout, result.stderr
 
@@ -25,7 +34,7 @@ def delete_apk_from_repo_only():
     print("\n🗑️  正在从 Git 仓库中移除所有 .apk 文件（本地文件保留）...")
 
     # 获取所有被 Git 跟踪的 .apk 文件
-    returncode, stdout, stderr = run_capture(["git", "ls-files", "--", "*.apk"])
+    returncode, stdout, stderr = run_capture_list(["git", "ls-files", "--", "*.apk"])
     if returncode != 0:
         print("   ⚠️ 无法获取 Git 跟踪的文件列表")
         return
@@ -37,7 +46,7 @@ def delete_apk_from_repo_only():
     deleted_count = 0
     for file_path in apk_files:
         # 使用 git rm --cached 仅删除索引中的记录，保留工作区文件
-        returncode, _, stderr = run_capture(["git", "rm", "--cached", "--ignore-unmatch", file_path])
+        returncode, _, stderr = run_capture_list(["git", "rm", "--cached", "--ignore-unmatch", file_path])
         if returncode == 0:
             print(f"   ✓ 已从仓库中移除（本地保留）: {file_path}")
             deleted_count += 1
@@ -148,10 +157,10 @@ def main():
     stashed = False
     if status_output:
         print("⚠️ 发现未暂存的更改，正在自动暂存（不影响已暂存的内容）...")
-        # --keep-index 只暂存未暂存的更改，保留已暂存（staged）的更改
+        # 使用列表形式避免 shell 解析问题
         stash_result = subprocess.run(
-            "git stash push --keep-index -m 'auto stash before rebase'",
-            shell=True, capture_output=True, text=True
+            ["git", "stash", "push", "--keep-index", "-m", "auto stash before rebase"],
+            capture_output=True, text=True
         )
         if stash_result.returncode != 0:
             print("❌ 暂存失败，请手动处理。")
@@ -163,12 +172,12 @@ def main():
 
     # 尝试 rebase
     print("正在将本地提交变基到远程分支...")
-    result = subprocess.run(f"git rebase origin/{BRANCH}", shell=True, capture_output=True, text=True)
+    result = subprocess.run(["git", "rebase", f"origin/{BRANCH}"], capture_output=True, text=True)
     if result.returncode != 0:
         print("❌ 变基时发生冲突！")
         if stashed:
             print("正在恢复之前暂存的更改...")
-            subprocess.run("git stash pop", shell=True)
+            subprocess.run(["git", "stash", "pop"], capture_output=True, text=True)
         print("请手动解决冲突后运行 'git rebase --continue' 再重新运行本脚本。")
         print("或运行 'git rebase --abort' 放弃本次操作。")
         print(f"错误信息：{result.stderr}")
@@ -180,7 +189,7 @@ def main():
     # 如果之前暂存了，恢复暂存内容
     if stashed:
         print("恢复之前暂存的更改...")
-        pop_result = subprocess.run("git stash pop", shell=True, capture_output=True, text=True)
+        pop_result = subprocess.run(["git", "stash", "pop"], capture_output=True, text=True)
         if pop_result.returncode != 0:
             print("⚠️ 恢复暂存内容时出现冲突，请手动处理。")
             print(pop_result.stderr)
