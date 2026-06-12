@@ -1,9 +1,223 @@
-{
-  "versionName": "1.0.174",
-  "tuijian": "bili_18064924565",
-  "tuijianMid": "3546586521012825",
-  "Github_token": "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",
-  "qq_group": "188888888",
-  "downloadUrl": "https://github.com/xoxolook-lgtm/update/raw/refs/heads/main/blbl-v1.0.174-debug.apk",
-  "changelog": "更新内容:14"
-}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>设备数据表格</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: system-ui, -apple-system, sans-serif;
+        }
+        body {
+            background-color: #f0f2f5;
+            padding: 15px;
+        }
+        .container {
+            max-width: 100%;
+            margin: 0 auto;
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.08);
+            overflow: hidden;
+        }
+        .header {
+            background: #2d3748;
+            color: #fff;
+            padding: 16px;
+            text-align: center;
+        }
+        .header h2 {
+            font-size: 16px;
+        }
+        .loading {
+            padding: 40px;
+            text-align: center;
+            color: #666;
+            font-size: 13px;
+        }
+        .table-wrap {
+            overflow-x: auto;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+        th, td {
+            padding: 10px 8px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+            vertical-align: top;
+        }
+        th {
+            background: #f7f8fa;
+            font-weight: 500;
+            color: #333;
+            white-space: nowrap;
+        }
+        td {
+            word-break: break-all;
+        }
+        tr:hover {
+            background: #fafafa;
+        }
+        /* uuid 列设为窄宽度 */
+        .col-uuid {
+            width: 180px;
+            min-width: 180px;
+        }
+        .tag-true {
+            color: #22c55e;
+            font-weight: bold;
+        }
+        .tag-false {
+            color: #ef4444;
+            font-weight: bold;
+        }
+        .copy-btn {
+            background: #e2e8f0;
+            border: none;
+            padding: 3px 6px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+        }
+        .copy-btn:hover {
+            background: #cbd5e1;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h2>远程设备数据表格</h2>
+        </div>
+        <div id="wrap" class="loading">正在加载数据...</div>
+    </div>
+
+    <script>
+        const dataUrl = "https://xoxolook-lgtm.github.io/update/user_date.json";
+        const wrap = document.getElementById("wrap");
+
+        fetch(dataUrl)
+        .then(res => res.text())
+        .then(rawText => {
+            wrap.className = "table-wrap";
+            wrap.innerHTML = "";
+
+            const splitList = rawText.trim().split(/\}\s*\{\s*/);
+            const deviceList = [];
+            splitList.forEach((str, idx) => {
+                let jsonStr = str;
+                if (idx === 0) jsonStr += "}";
+                else if (idx === splitList.length - 1) jsonStr = "{" + jsonStr;
+                else jsonStr = "{" + jsonStr + "}";
+                try {
+                    deviceList.push(JSON.parse(jsonStr));
+                } catch (err) {
+                    console.error("单条解析失败", err);
+                }
+            });
+
+            if (deviceList.length === 0) {
+                wrap.className = "loading";
+                wrap.innerText = "未解析到有效数据";
+                return;
+            }
+
+            // 自定义字段顺序：online 最前，uuid 最后，其余中间保留原有顺序
+            const allFields = new Set();
+            deviceList.forEach(item => Object.keys(item).forEach(k => allFields.add(k)));
+            const fieldArr = Array.from(allFields);
+            const customOrder = [];
+
+            // 1. online 放第一位
+            if(fieldArr.includes("online")){
+                customOrder.push("online");
+                const idx = fieldArr.indexOf("online");
+                fieldArr.splice(idx, 1);
+            }
+            // 2. 放入剩余字段（排除 uuid）
+            fieldArr.forEach(key => {
+                if(key !== "uuid") customOrder.push(key);
+            });
+            // 3. uuid 放最后一位
+            if(allFields.has("uuid")) customOrder.push("uuid");
+
+            const table = document.createElement("table");
+            const thead = document.createElement("thead");
+            const tbody = document.createElement("tbody");
+
+            // 表头
+            const trHead = document.createElement("tr");
+            const thIndex = document.createElement("th");
+            thIndex.innerText = "设备编号";
+            trHead.appendChild(thIndex);
+
+            customOrder.forEach(key => {
+                const th = document.createElement("th");
+                th.innerText = key;
+                if(key === "uuid") th.className = "col-uuid";
+                trHead.appendChild(th);
+            });
+
+            const thOp = document.createElement("th");
+            thOp.innerText = "操作";
+            trHead.appendChild(thOp);
+            thead.appendChild(trHead);
+            table.appendChild(thead);
+
+            // 数据行
+            deviceList.forEach((item, index) => {
+                const tr = document.createElement("tr");
+                const tdIndex = document.createElement("td");
+                tdIndex.innerText = `设备 ${index + 1}`;
+                tr.appendChild(tdIndex);
+
+                customOrder.forEach(key => {
+                    const td = document.createElement("td");
+                    if(key === "uuid") td.className = "col-uuid";
+                    
+                    const val = item[key];
+                    if (val === "true" || val === true) {
+                        td.innerHTML = '<span class="tag-true">✅ true</span>';
+                    } else if (val === "false" || val === false) {
+                        td.innerHTML = '<span class="tag-false">❌ false</span>';
+                    } else if (val === undefined || val === null) {
+                        td.innerText = "-";
+                    } else {
+                        td.innerText = val;
+                    }
+                    tr.appendChild(td);
+                });
+
+                // 复制按钮
+                const tdOp = document.createElement("td");
+                const btn = document.createElement("button");
+                btn.className = "copy-btn";
+                btn.innerText = "复制";
+                btn.dataset.json = JSON.stringify(item);
+                btn.onclick = function () {
+                    navigator.clipboard.writeText(this.dataset.json).then(() => {
+                        this.innerText = "已复制";
+                        setTimeout(() => this.innerText = "复制", 1500);
+                    });
+                };
+                tdOp.appendChild(btn);
+                tr.appendChild(tdOp);
+                tbody.appendChild(tr);
+            });
+
+            table.appendChild(tbody);
+            wrap.appendChild(table);
+        })
+        .catch(err => {
+            wrap.className = "loading";
+            wrap.innerText = "加载失败：" + err.message;
+        });
+    </script>
+</body>
+</html>
