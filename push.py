@@ -157,7 +157,6 @@ def main():
     stashed = False
     if status_output:
         print("⚠️ 发现未暂存的更改，正在自动暂存（不影响已暂存的内容）...")
-        # 使用列表形式避免 shell 解析问题
         stash_result = subprocess.run(
             ["git", "stash", "push", "--keep-index", "-m", "auto stash before rebase"],
             capture_output=True, text=True
@@ -176,8 +175,9 @@ def main():
     if result.returncode != 0:
         print("❌ 变基时发生冲突！")
         if stashed:
-            print("正在恢复之前暂存的更改...")
-            subprocess.run(["git", "stash", "pop"], capture_output=True, text=True)
+            # 变基失败，丢弃 stash，避免冲突干扰手动解决
+            subprocess.run(["git", "stash", "drop"], capture_output=True, text=True)
+            print("   已丢弃临时存储，请手动解决冲突后运行 'git rebase --continue'")
         print("请手动解决冲突后运行 'git rebase --continue' 再重新运行本脚本。")
         print("或运行 'git rebase --abort' 放弃本次操作。")
         print(f"错误信息：{result.stderr}")
@@ -186,17 +186,11 @@ def main():
     else:
         print("✅ 变基成功，本地历史已更新。")
 
-    # 如果之前暂存了，恢复暂存内容
+    # 如果之前暂存了，直接丢弃 stash（不恢复未暂存的删除状态，因为这些删除不会影响推送）
     if stashed:
-        print("恢复之前暂存的更改...")
-        pop_result = subprocess.run(["git", "stash", "pop"], capture_output=True, text=True)
-        if pop_result.returncode != 0:
-            print("⚠️ 恢复暂存内容时出现冲突，请手动处理。")
-            print(pop_result.stderr)
-            input("按回车退出...")
-            return
-        else:
-            print("   ✓ 已恢复未暂存的更改")
+        print("丢弃之前暂存的更改（本地未暂存的删除不会影响本次推送）...")
+        subprocess.run(["git", "stash", "drop"], capture_output=True, text=True)
+        print("   ✓ 已丢弃临时存储")
 
     # 推送（不带 --force）
     print("\n6/6 正在推送至远程仓库...")
